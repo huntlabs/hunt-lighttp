@@ -9,7 +9,7 @@ import std.string : toUpper, toLower, split, join, strip, indexOf;
 import std.traits : EnumMembers;
 import std.uri : encode, decodeComponent;
 
-import libasync : NetworkAddress;
+// import libasync : NetworkAddress;
 
 import url : URL;
 
@@ -410,7 +410,7 @@ template HttpImpl(User user, Type type) {
 
 	class HttpImpl : Http {
 
-		static if(user == User.client && type == Type.response || user == User.server && type == Type.request) public NetworkAddress address;
+		// static if(user == User.client && type == Type.response || user == User.server && type == Type.request) public NetworkAddress address;
 
 		static if(type == Type.request) private URL _url;
 

@@ -9,7 +9,7 @@ import std.socket : Address;
 import std.string : startsWith, join;
 import std.traits : Parameters, hasUDA;
 
-import libasync : AsyncTCPConnection;
+import hunt.io.TcpStream;
 
 import lighttp.server.resource;
 import lighttp.server.server : ServerOptions, Connection, MultipartConnection, WebSocketConnection;
@@ -47,7 +47,7 @@ class Router {
 	/*
 	 * Handles a connection.
 	 */
-	void handle(ServerOptions options, ref HandleResult result, AsyncTCPConnection client, ServerRequest req, ServerResponse res) {
+	void handle(ServerOptions options, ref HandleResult result, TcpStream client, ServerRequest req, ServerResponse res) {
 		if(!req.url.path.startsWith("/")) {
 			res.status = StatusCodes.badRequest;
 		} else {
@@ -130,7 +130,7 @@ class Router {
 
 class Route {
 
-	abstract void handle(ServerOptions options, ref HandleResult result, AsyncTCPConnection client, ServerRequest req, ServerResponse res);
+	abstract void handle(ServerOptions options, ref HandleResult result, TcpStream client, ServerRequest req, ServerResponse res);
 
 }
 
@@ -166,16 +166,16 @@ class RouteImpl(T, E...) if(is(T == string) || isRegexFor!(T, string)) : Route {
 		this.path = path;
 	}
 	
-	void callImpl(void delegate(E) del, ServerOptions options, AsyncTCPConnection client, ServerRequest req, ServerResponse res, Match match) {
+	void callImpl(void delegate(E) del, ServerOptions options, TcpStream client, ServerRequest req, ServerResponse res, Match match) {
 		Args args;
 		static if(__request != -1) args[__request] = req;
 		static if(__response != -1) args[__response] = res;
 		del(args, match);
 	}
 	
-	abstract void call(ServerOptions options, ref HandleResult result, AsyncTCPConnection client, ServerRequest req, ServerResponse res, Match match);
+	abstract void call(ServerOptions options, ref HandleResult result, TcpStream client, ServerRequest req, ServerResponse res, Match match);
 	
-	override void handle(ServerOptions options, ref HandleResult result, AsyncTCPConnection client, ServerRequest req, ServerResponse res) {
+	override void handle(ServerOptions options, ref HandleResult result, TcpStream client, ServerRequest req, ServerResponse res) {
 		static if(is(T == string)) {
 			if(req.url.path[1..$] == this.path) {
 				this.call(options, result, client, req, res);
@@ -212,7 +212,7 @@ class RouteOf(T, E...) : RouteImpl!(T, E) {
 		this.del = del;
 	}
 	
-	override void call(ServerOptions options, ref HandleResult result, AsyncTCPConnection client, ServerRequest req, ServerResponse res, Match match) {
+	override void call(ServerOptions options, ref HandleResult result, TcpStream client, ServerRequest req, ServerResponse res, Match match) {
 		this.callImpl(this.del, options, client, req, res, match);
 	}
 	
@@ -224,7 +224,7 @@ class MultipartRouteOf(T, E...) : RouteOf!(T, E) {
 		super(path, del);
 	}
 
-	override void call(ServerOptions options, ref HandleResult result, AsyncTCPConnection client, ServerRequest req, ServerResponse res, Match match) {
+	override void call(ServerOptions options, ref HandleResult result, TcpStream client, ServerRequest req, ServerResponse res, Match match) {
 		if(auto lstr = "content-length" in req.headers) {
 			try {
 				size_t length = to!size_t(*lstr);
@@ -260,7 +260,7 @@ class WebSocketRouteOf(WebSocket, T, E...) : RouteImpl!(T, E) {
 		this.createWebSocket = createWebSocket;
 	}
 
-	override void call(ServerOptions options, ref HandleResult result, AsyncTCPConnection client, ServerRequest req, ServerResponse res, Match match) {
+	override void call(ServerOptions options, ref HandleResult result, TcpStream client, ServerRequest req, ServerResponse res, Match match) {
 		auto key = "sec-websocket-key" in req.headers;
 		if(key) {
 			res.status = StatusCodes.switchingProtocols;

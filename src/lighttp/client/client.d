@@ -2,11 +2,11 @@
 
 import std.conv : to, ConvException;
 
-import libasync;
+import hunt.io;
+import hunt.event;
+import hunt.collection.ByteBuffer;
 
 import lighttp.util;
-
-import xbuffer : Buffer;
 
 struct ClientOptions {
 
@@ -28,9 +28,9 @@ class Client {
 		_options = options;
 	}
 
-	this(ClientOptions options=ClientOptions.init) {
-		this(getThreadEventLoop(), options);
-	}
+	//this(ClientOptions options=ClientOptions.init) {
+	//	this(getThreadEventLoop(), options);
+	//}
 
 	@property ClientOptions options() pure nothrow @safe @nogc {
 		return _options;
@@ -41,12 +41,12 @@ class Client {
 	}
 
 	ClientConnection connect(string ip, ushort port=80) {
-		return new ClientConnection(new AsyncTCPConnection(_eventLoop), ip, port);
+		return new ClientConnection(new TcpStream(_eventLoop), ip, port);
 	}
 
 	class ClientConnection {
 
-		private AsyncTCPConnection _connection;
+		private TcpStream _connection;
 
 		private bool _connected = false;
 		private bool _performing = false;
@@ -54,7 +54,6 @@ class Client {
 
 		private immutable string host;
 
-		private Buffer _buffer;
 		private size_t _contentLength;
 		private void delegate() _handler;
 
@@ -63,14 +62,16 @@ class Client {
 		private void delegate(ClientResponse) _success;
 		private void delegate() _failure;
 
-		this(AsyncTCPConnection connection, string ip, ushort port) {
-			_buffer = new Buffer(4096);
-			_handler = &this.handleFirst;
-			_success = (ClientResponse response){};
-			_failure = {};
+		this(TcpStream connection, string ip, ushort port) {
 			_connection = connection;
-			_connection.host(ip, port);
-			_connection.run(&this.handler);
+			_connection.onReceived(&this.onRead);
+			_connection.onConnected((bool isSucceeded) {
+				if (isSucceeded) {
+					_connected = true;
+				}
+			});
+			_connection.connect(ip, port);
+
 			this.host = ip ~ (port != 80 ? ":" ~ to!string(port) : "");
 		}
 
@@ -80,10 +81,10 @@ class Client {
 			_successful = false;
 			request.headers["Host"] = this.host;
 			if(_connected) {
-				_connection.send(cast(ubyte[])request.toString());
+				_connection.write(cast(ubyte[])request.toString());
 			} else {
-				_buffer.reset();
-				_buffer.write(request.toString());
+				//_buffer.reset();
+				//_buffer.write(request.toString());
 			}
 			return this;
 		}
@@ -107,42 +108,19 @@ class Client {
 		}
 
 		bool close() {
-			return _connection.kill();
+			_connection.close();
+			return true;
 		}
 		
-		private void handler(TCPEvent event) {
-			switch(event) with(TCPEvent) {
-				case CONNECT:
-					_connected = true;
-					if(_buffer.data.length) _connection.send(_buffer.data!ubyte);
-					break;
-				case READ:
-					static ubyte[] __buffer = new ubyte[4096];
-					_buffer.reset();
-					while(true) {
-						auto len = _connection.recv(__buffer);
-						if(len > 0) _buffer.write(__buffer[0..len]);
-						if(len < __buffer.length) break;
-					}
-					_handler();
-					break;
-				case CLOSE:
-					if(!_successful) _failure();
-					break;
-				default:
-					break;
-			}
-		}
-		
-		private void handleFirst() {
+		private void onRead(ByteBuffer buffer) {
 			ClientResponse response = new ClientResponse();
-			if(response.parse(_buffer.data!char)) {
+			if(response.parse(cast(string)buffer.getRemaining())) {
 				if(auto contentLength = "content-length" in response.headers) {
 					try {
 						_contentLength = to!size_t(*contentLength);
 						if(_contentLength > response.body_.length) {
-							_handler = &this.handleLong;
 							_response = response;
+							this.handleLong(buffer);
 							return;
 						}
 					} catch(ConvException) {
@@ -165,8 +143,8 @@ class Client {
 			}
 		}
 
-		private void handleLong() {
-			_response.body_ = _response.body_ ~ _buffer.data!char;
+		private void handleLong(ByteBuffer buffer) {
+			_response.body_ = _response.body_ ~ cast(char[])buffer.getRemaining();
 			if(_response.body_.length >= _contentLength) {
 				_performing = false;
 				_successful = true;
@@ -174,7 +152,5 @@ class Client {
 				if(_options.closeOnSuccess) this.close();
 			}
 		}
-
 	}
-
 }
